@@ -1,11 +1,12 @@
-use log::info;
-
-use crate::utils::args;
-
 mod utils;
+
 
 fn main() {
     env_logger::init();
-    info!("Hello World!");
-    args::test_function();
+
+    let matches = utils::args::init();
+
+    let ip_address = matches.value_of("ip").expect("must provide an ip address");
+    let zone_id = matches.value_of("zone-id").expect("must provide a zone id");
+    let api_token = matches.value_of("api-token").expect("must provide api token");
 }
