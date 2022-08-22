@@ -10,9 +10,9 @@ use cloudflare::framework::{
 fn main() {
     println!("Hello, world!");
 
-    let zone_id = "201ad99a8d8e1d0648fab41d1f04559c";
+    let zone_id = "";
     let name = "red.faultycloud.xyz";
-    let token = "w1iXQ3IXFjiNHNJo4-Fn0UdKXaZqk4HJiDwnQsch";
+    let token = "";
 
     let creds : Credentials = Credentials::UserAuthToken { token: token.to_string() };
 
