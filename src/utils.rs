@@ -21,12 +21,6 @@ pub mod args {
                 .takes_value(true)
                 .env("ZONE_ID")
                 .help("The zone to modify as provided by Cloudflare"))
-            .arg(Arg::with_name("ip")
-                .long("ip")
-                .required(true)
-                .takes_value(true)
-                .env("IP")
-                .help("The IP address to map to"))
             .get_matches();
     }
 }
