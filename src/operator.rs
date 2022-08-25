@@ -13,15 +13,20 @@ pub async fn start_operations() -> crate::Result<()> {
 
     let ingress_api: Api<Ingress> = Api::all(kubectl.clone());
     let context: Arc<KubernetesContext>  = Arc::new(KubernetesContext {
-        client: kubectl.clone()
+        client: kubectl.clone(),
+        update_seconds: 1800,
     }); 
 
     Controller::new(ingress_api.clone(), ListParams::default())
         .run(reconciler, error_policy, context)
         .for_each(|result| async move {
             match result {
-                Ok(ingress) => {
-
+                Ok(i) => {
+                    let ingress = i.0.clone();
+                    match ingress.namespace {
+                        Some(ns) => { log::warn!("Reconciled ingress {:?}.{:?}", ns, ingress.name); },
+                        _ => { log::warn!("Reconciled {:?}", ingress.name) }
+                    }
                 },
                 Err(e) => {
                     match e {
@@ -53,11 +58,12 @@ pub async fn start_operations() -> crate::Result<()> {
                     }
                 }
             }
-        });
+        }).await;
+        
     Ok(())
 }
 
-fn error_policy(error: &kube::Error, context: Arc<KubernetesContext>) -> Action {
+fn error_policy(error: &kube::Error, _context: Arc<KubernetesContext>) -> Action {
     log::error!("on_error => {:?}", error);
     Action::await_change()
 }

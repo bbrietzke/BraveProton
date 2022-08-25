@@ -27,7 +27,6 @@ pub enum AppError {
 
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut v = String::new();
         let msg = match self {
             Self::DnsFailedToCreate => { "failed to create the DNS entry" },
             Self::DnsFailedToDelete => { "failed to delete the DNS entry" },
