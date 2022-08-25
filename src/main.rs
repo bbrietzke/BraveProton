@@ -1,11 +1,13 @@
 mod operator;
+mod utils;
+mod reconciller;
 
 use crate::operator::start_operations;
 
 #[tokio::main]
 async fn main() -> crate::Result<()> {
     env_logger::init();
-    
+
     match start_operations().await {
         Err(e) => {
             Err(e)
@@ -14,9 +16,9 @@ async fn main() -> crate::Result<()> {
     }
 }
 
-type Result<T> = std::result::Result<T, AppError>;
+pub type Result<T> = std::result::Result<T, AppError>;
 
-enum AppError {
+pub enum AppError {
     DnsFailedToCreate,
     DnsFailedToDelete,
     DnsFailedToUpdate,
