@@ -3,22 +3,29 @@ use k8s_openapi::{api::networking::v1::Ingress, serde_json::{json, Value}};
 use kube::{Api, runtime::controller::Action, ResourceExt, Resource, Client};
 
 use crate::utils::{ KubernetesContext, OperatorActivities };
+use crate::error::{Result, AppError};
 
 
-pub async fn reconciler(ingress: Arc<Ingress>, context: Arc<KubernetesContext>) -> Result<Action, kube::Error> {
+pub async fn reconciler(ingress: Arc<Ingress>, context: Arc<KubernetesContext>) -> std::result::Result<Action, kube::Error> {
     let name: String = ingress.name_any();
     let ns: String = ingress.namespace().expect("Must have a valid namespace");
-    let update_seconds = context.update_seconds;
+    let update_seconds: u64 = context.update_seconds;
 
     return match determine_activity(ingress, update_seconds) {
         OperatorActivities::Create => {
-            Ok(Action::await_change())
+            match update_ingress(context.client.clone(), &name, &ns, update_seconds).await {
+                Ok(action) => { return Ok(action); },
+                Err(e) => { return Err(e.into()); },
+            }
         },
         OperatorActivities::Delete => {
-            Ok(Action::await_change())
+            match delete_ingress(context.client.clone(), &name, &ns).await {
+                Ok(action) => { return Ok(action); },
+                Err(e) => { return Err(e.into()); },
+            }
         },
-        OperatorActivities::Update(_) => {
-            Ok(Action::await_change())
+        OperatorActivities::Update(duration) => {
+            Ok(Action::requeue(duration))
         },
     }
 }
@@ -35,10 +42,57 @@ fn determine_activity(ingress: Arc<Ingress>, update_seconds: u64) -> OperatorAct
     }
 }
 
-async fn set_finalizer(client: Client, ingress_name: &str, ingress_namespace: &str, finalizer_value: &str) -> Result<Ingress, kube::Error> {
+async fn update_ingress(client: Client, ingress_name: &str, ingress_namespace: &str, update_seconds: u64) -> Result<Action> {
+    match set_finalizer(client.clone(), ingress_name, ingress_namespace ).await {
+        Err(e) => { return Err(AppError::from(e)) },
+        Ok(value) => {
+            let mut hosts: Vec<String> = Vec::<String>::new();
+            match &value.spec {
+                Some(spec) => {
+                    for rule in spec.rules.as_ref().unwrap() {
+                        match &rule.host {
+                            Some(host) => { hosts.push(host.clone()); }
+                            None => { }
+                        };
+                    }
+
+                    // Add dns updates here
+                },
+                None => {
+                    return Err(AppError::ApiError(String::from("no spec clause found for ingress")));
+                }
+            }
+
+        },
+    } 
+    
+    Ok(Action::requeue(Duration::from_secs(update_seconds)))
+}
+
+async fn delete_ingress(client: Client, ingress_name: &str, ingress_namespace: &str) -> Result<Action> {
+    match delete_finalizer(client.clone(), ingress_name, ingress_namespace).await {
+        Err(e) => { return Err(AppError::from(e)) },
+        Ok(_value) => {
+            // delete DNS entries here
+        },
+    } 
+    Ok(Action::await_change())
+}
+
+async fn set_finalizer(client: Client, ingress_name: &str, ingress_namespace: &str) -> std::result::Result<Ingress, kube::Error> {
     let api: Api<Ingress> = Api::namespaced(client.clone(), ingress_namespace);
     let finalizer: Value = json!({
-        "metadata": { "finalizers": finalizer_value }
+        "metadata": { "finalizers": ["brave-proton.faultycloud.io/finalizer"] }
+    });
+
+    let patch: kube::api::Patch<&Value> = kube::api::Patch::Merge(&finalizer);
+    api.patch(ingress_name, &kube::api::PatchParams::default(), &patch).await
+}
+
+async fn delete_finalizer(client: Client, ingress_name: &str, ingress_namespace: &str) -> std::result::Result<Ingress, kube::Error> {
+    let api: Api<Ingress> = Api::namespaced(client.clone(), ingress_namespace);
+    let finalizer: Value = json!({
+        "metadata": { "finalizers": [] }
     });
 
     let patch: kube::api::Patch<&Value> = kube::api::Patch::Merge(&finalizer);

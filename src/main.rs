@@ -1,11 +1,13 @@
 mod operator;
 mod utils;
 mod reconciller;
+mod error;
+
 
 use crate::operator::start_operations;
 
 #[tokio::main]
-async fn main() -> crate::Result<()> {
+async fn main() -> crate::error::Result<()> {
     env_logger::init();
 
     match start_operations().await {
@@ -13,46 +15,5 @@ async fn main() -> crate::Result<()> {
             Err(e)
         },
         _ => { Ok(())}
-    }
-}
-
-pub type Result<T> = std::result::Result<T, AppError>;
-
-pub enum AppError {
-    DnsFailedToCreate,
-    DnsFailedToDelete,
-    DnsFailedToUpdate,
-    Kubernetes(kube::Error)
-}
-
-impl std::fmt::Display for AppError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let msg = match self {
-            Self::DnsFailedToCreate => { "failed to create the DNS entry" },
-            Self::DnsFailedToDelete => { "failed to delete the DNS entry" },
-            Self::DnsFailedToUpdate => { "failed to update the DNS entry" },
-            Self::Kubernetes(_) => { "Kubernetes freaked out" },
-        };
-
-        write!(f, "{}", msg)
-    }
-}
-
-impl std::fmt::Debug for AppError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let msg = match self {
-            Self::DnsFailedToCreate => { "failed to create the DNS entry" },
-            Self::DnsFailedToDelete => { "failed to delete the DNS entry" },
-            Self::DnsFailedToUpdate => { "failed to update the DNS entry" },
-            Self::Kubernetes(_) => { "Kubernetes freaked out" },
-        };
-
-        write!(f, "[ file: {}] [line: {}] {}", file!(), line!(), msg)
-    }
-}
-
-impl From<kube::Error> for AppError {
-    fn from(error: kube::Error) -> Self {
-        AppError::Kubernetes(error)
     }
 }

@@ -5,10 +5,11 @@ use kube::{Client, Api, api::ListParams, runtime::{Controller, controller::Actio
 
 use crate::utils::KubernetesContext;
 use crate::reconciller::reconciler;
+use crate::error::{Result};
 
 
 
-pub async fn start_operations() -> crate::Result<()> {
+pub async fn start_operations() -> Result<()> {
     let kubectl: Client = Client::try_default().await?;
 
     let ingress_api: Api<Ingress> = Api::all(kubectl.clone());
@@ -64,6 +65,6 @@ pub async fn start_operations() -> crate::Result<()> {
 }
 
 fn error_policy(error: &kube::Error, _context: Arc<KubernetesContext>) -> Action {
-    log::error!("on_error => {:?}", error);
+    log::error!("error_policy => {:?}", error);
     Action::await_change()
 }
