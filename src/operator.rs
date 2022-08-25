@@ -10,7 +10,9 @@ pub async fn start_operations(api_token: &str, zone_id: &str) -> () {
     let context:std::sync::Arc<utils::Context> = std::sync::Arc::new(utils::Context{ 
         api_token: api_token.to_string(), 
         zone_id: zone_id.to_string(), 
-        client: kubectl.clone() 
+        client: kubectl.clone(),
+        ip: None,
+        host: None 
     });
 
     kube::runtime::Controller::new(ingress_api.clone(), kube::api::ListParams::default())
@@ -19,7 +21,16 @@ pub async fn start_operations(api_token: &str, zone_id: &str) -> () {
             match result {
                 Ok(ingress) => {
                     let i = ingress.0.clone();
-                    log::info!("success with {:?}", i);
+                    let name = i.name;
+                    match i.namespace {
+                        Some(ns) => {
+                            log::warn!("Reconciled ingress {:?}.{:?}", &ns, &name);
+                        },
+                        _ => {
+                            log:: warn!("Reconciled {:?}", name);
+                        }
+                        
+                    };
                 }
                 Err(error) => {
                     log::error!("error reconcilling : {:?}", error)
@@ -64,28 +75,16 @@ async fn reconcile_ingress(ingress: std::sync::Arc<k8s_openapi::api::networking:
 
     return match utils::determine_activity(&ingress) {
         utils::OperatorActivities::Retry(value) => {
-            log::info!("Retry");
+            activities::update_entries(context.client.clone(), &name, &namespace, host_names, &ip, &context.api_token, &context.zone_id).await?;
             Ok(kube::runtime::controller::Action::requeue(value))
         },
         utils::OperatorActivities::Delete => {
-            match activities::delete_entries(context.client.clone(), &name, &namespace, host_names, &context.api_token, &context.zone_id).await {
-                Err(error) => {
-                    return Err(error);
-                },
-                _ => {
-                    Ok(kube::runtime::controller::Action::await_change())
-                }
-            }
+            activities::delete_entries(context.client.clone(), &name, &namespace, host_names, &context.api_token, &context.zone_id).await?;
+            Ok(kube::runtime::controller::Action::await_change())
         },
         utils::OperatorActivities::Create => {
-            match activities::create_entries(context.client.clone(), &name, &namespace, host_names, ip, &context.api_token, &context.zone_id).await {
-                Err(error) => {
-                    return Err(error);
-                },
-                _ => {
-                    Ok(kube::runtime::controller::Action::requeue(std::time::Duration::from_secs(1800)))
-                }
-            }
+            activities::create_entries(context.client.clone(), &name, &namespace, host_names, &ip, &context.api_token, &context.zone_id).await?;
+            Ok(kube::runtime::controller::Action::requeue(std::time::Duration::from_secs(1800)))
         }
     };
 
@@ -100,14 +99,47 @@ fn on_error(error: &kube::Error, _context:std::sync::Arc<utils::Context>) -> kub
 }
 
 mod activities {
-    pub async fn create_entries(client: kube::Client, name: &str, ns: &str, host_names: Vec<String>, ip: String, api_token: &str, zone_id: &str) -> Result<(), kube::Error> {
-        match super::finalization::add_finalizer(client, name, ns).await {
+    use crate::cloudflared::{ create_record, delete_record, update_record };
+    use kube::{error::ErrorResponse};
+
+    pub async fn update_entries(client: kube::Client, name: &str, ns: &str, host_names: Vec<String>, ip: &str, api_token: &str, zone_id: &str) -> Result<(), kube::Error> {
+        for host in &host_names {
+            log::info!("updating DNS for {:?} to be {:?}!", &host, ip);
+            match update_record(api_token, zone_id, host_names.clone(), ip).await {
+                Err(_e) => {
+                    return Err(kube::Error::Api(ErrorResponse {
+                       status:"failed".to_string(), 
+                       message:"DNS did not update".to_string(),  
+                       reason: "DNS did not update".to_string(),
+                       code: 1
+                   }));
+                },
+                _ => { return Ok(()); }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn create_entries(client: kube::Client, name: &str, ns: &str, host_names: Vec<String>, ip: &str, api_token: &str, zone_id: &str) -> Result<(), kube::Error> {
+        match super::finalization::add_finalizer(client.clone(), name, ns).await {
             Err(error) => {
                 return Err(error);
             },
             Ok(_ingress) => {
-                for host in host_names {
-                    log::info!("updating DNS for {:?} to be {:?}!", host, ip)
+                for host in &host_names {
+                    log::info!("creating DNS for {:?} to be {:?}!", &host, ip);
+                    match create_record(api_token, zone_id, host_names.clone(), ip ).await {
+                        Err(_e) => {
+                             return Err(kube::Error::Api(ErrorResponse {
+                                status:"failed".to_string(), 
+                                message:"DNS did not create entries".to_string(),  
+                                reason: "DNS did not create entries".to_string(),
+                                code: 1
+                            }));
+                        },
+                        _ => { }
+                    }
                 }
             }
         };
@@ -121,8 +153,19 @@ mod activities {
                 return Err(error);
             },
             Ok(_ingress) => {
-                for host in host_names {
-                    log::info!("removing DNS for {:?}", host)
+                for host in &host_names {
+                    log::info!("removing DNS for {:?}", host);
+                    match delete_record(api_token, zone_id, host_names.clone()).await {
+                        Err(_e) => {
+                            return Err(kube::Error::Api(ErrorResponse {
+                               status:"failed".to_string(), 
+                               message:"DNS did not delete entries".to_string(),  
+                               reason: "DNS did not delete entries".to_string(),
+                               code: 1
+                           }));
+                       },
+                        _ => { return Ok(()); }
+                    }
                 }
             }
         };
@@ -135,7 +178,9 @@ mod utils {
     pub struct Context {
         pub api_token: String,
         pub zone_id: String,
-        pub client: kube::client::Client
+        pub client: kube::client::Client,
+        pub ip: Option<String>,
+        pub host: Option<String>
     }
     
     pub enum OperatorActivities {
@@ -206,8 +251,8 @@ mod utils {
 mod finalization {
     use k8s_openapi::serde_json::{json, Value};
 
-    pub async fn add_finalizer(client:kube::Client, name: &str, namespace: &str) -> Result<k8s_openapi::api::networking::v1::Ingress, kube::Error> {
-        let api: kube::Api<k8s_openapi::api::networking::v1::Ingress> = kube::Api::namespaced(client, namespace);
+    pub async fn add_finalizer(client: kube::Client, name: &str, namespace: &str) -> Result<k8s_openapi::api::networking::v1::Ingress, kube::Error> {
+        let api: kube::Api<k8s_openapi::api::networking::v1::Ingress> = kube::Api::namespaced(client.clone(), namespace);
         let finalizer: Value = json!({
             "metadata": {
                 "finalizers": ["brave-proton.faultycloud.io/finalizer"]
