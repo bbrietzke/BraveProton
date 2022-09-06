@@ -1,0 +1,5 @@
+make: Entering directory `/Users/bbrietzke/Development/BraveProton'
+/opt/homebrew/bin/cargo check
+/opt/homebrew/bin/cargo run -- 
+make: Leaving directory `/Users/bbrietzke/Development/BraveProton'
+ 

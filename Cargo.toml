@@ -13,3 +13,5 @@ log = "0.4.17"
 tokio = { version = "1.2", features = ["macros", "rt-multi-thread"] }
 clap = { version = "3", features = ["env"] }
 futures-util = "0.3"
+cloudflare = "0.9"
+anyhow = "1"

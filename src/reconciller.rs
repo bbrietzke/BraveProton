@@ -30,8 +30,6 @@ pub async fn reconciler(ingress: Arc<Ingress>, context: Arc<KubernetesContext>) 
     }
 }
 
-
-
 fn determine_activity(ingress: Arc<Ingress>, update_seconds: u64) -> OperatorActivities {
     return if ingress.meta().deletion_timestamp.is_some() {
         OperatorActivities::Delete
@@ -46,6 +44,31 @@ async fn update_ingress(client: Client, ingress_name: &str, ingress_namespace: &
     match set_finalizer(client.clone(), ingress_name, ingress_namespace ).await {
         Err(e) => { return Err(AppError::from(e)) },
         Ok(value) => {
+            match &value.status {
+                Some(status) => {
+                    match &status.load_balancer.as_ref().unwrap().ingress {
+                        None => {  },
+                        Some(balancers) => {
+                            for b in balancers {
+                                match &b.ip  {
+                                    Some(ip_address) => { ip_address.clone() },
+                                    None => {
+                                        match &b.hostname {
+                                            Some(host) => { host.to_string() },
+                                            None  => { 
+                                                return Err(AppError::ApiError(String::from("No hostname or IP address could be returned.")));
+                                            }
+                                        }
+                                    },
+                                };
+                            }
+                        }
+                    }
+                },
+                None => {
+                    return Err(AppError::ApiError(String::from("no status clause found for ingress")));
+                }
+            };
             let mut hosts: Vec<String> = Vec::<String>::new();
             match &value.spec {
                 Some(spec) => {
@@ -73,6 +96,7 @@ async fn delete_ingress(client: Client, ingress_name: &str, ingress_namespace: &
     match delete_finalizer(client.clone(), ingress_name, ingress_namespace).await {
         Err(e) => { return Err(AppError::from(e)) },
         Ok(_value) => {
+            log::info!("removing DNS entries.");
             // delete DNS entries here
         },
     } 
@@ -80,6 +104,7 @@ async fn delete_ingress(client: Client, ingress_name: &str, ingress_namespace: &
 }
 
 async fn set_finalizer(client: Client, ingress_name: &str, ingress_namespace: &str) -> std::result::Result<Ingress, kube::Error> {
+    log::info!("adding finalizer.");
     let api: Api<Ingress> = Api::namespaced(client.clone(), ingress_namespace);
     let finalizer: Value = json!({
         "metadata": { "finalizers": ["brave-proton.faultycloud.io/finalizer"] }
@@ -90,6 +115,7 @@ async fn set_finalizer(client: Client, ingress_name: &str, ingress_namespace: &s
 }
 
 async fn delete_finalizer(client: Client, ingress_name: &str, ingress_namespace: &str) -> std::result::Result<Ingress, kube::Error> {
+    log::info!("removing finalizer.");
     let api: Api<Ingress> = Api::namespaced(client.clone(), ingress_namespace);
     let finalizer: Value = json!({
         "metadata": { "finalizers": [] }

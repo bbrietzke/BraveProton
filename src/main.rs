@@ -2,6 +2,7 @@ mod operator;
 mod utils;
 mod reconciller;
 mod error;
+mod clouddns;
 
 
 use crate::operator::start_operations;
@@ -14,6 +15,6 @@ async fn main() -> crate::error::Result<()> {
         Err(e) => {
             Err(e)
         },
-        _ => { Ok(())}
+        _ => { Ok(()) }
     }
 }
